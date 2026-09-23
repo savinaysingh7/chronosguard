@@ -77,7 +77,7 @@ def generate_all_periods(save_dir: str = "data/raw", seed: int = 42) -> Dict[str
             "is_default": is_default
         })
         
-    clean_df = clean_df.sort_values(by=["credit_score", "annual_income"], ascending=[True, True]).reset_index(drop=True)
+    clean_df = clean_df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
     
     chunk_size = len(clean_df) // 5
     batches = {}

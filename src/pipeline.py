@@ -227,7 +227,9 @@ def run_chronos_guard_pipeline(
             "validation_eval": val_eval,
             "validation_cbpe": val_cbpe,
             "validation_operational_cost": val_op_cost,
-            "baseline_cost_per_sample": round(baseline_cost_per_sample, 2)
+            "baseline_cost_per_sample": round(baseline_cost_per_sample, 2),
+            "baseline_fpr": round(val_eval["fp"] / max(1, val_eval["fp"] + val_eval["tn"]), 4),
+            "baseline_fnr": round(val_eval["fn"] / max(1, val_eval["fn"] + val_eval["tp"]), 4)
         },
         "stream_evaluations": batch_results
     }
