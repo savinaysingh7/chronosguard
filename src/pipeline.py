@@ -52,18 +52,18 @@ def run_chronos_guard_pipeline(
     print("CHRONOSGUARD: DATA DRIFT & MODEL DECAY DETECTION PIPELINE")
     print("=" * 70)
     
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     # Step 1: Load or Generate Datasets
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     print("\n[Step 1] Ingesting Temporal Stream Data...")
     batches = generate_all_periods(save_dir=data_dir, seed=seed)
     
     ref_df = batches["T0_Reference"]
     print(f"Reference Dataset (T0): {len(ref_df)} rows, Default Rate: {ref_df[TARGET_COLUMN].mean():.2%}")
     
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     # Step 2: Train/Validation Split of T0
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     print("\n[Step 2] Splitting T0 into Train (80%) / Validation (20%)...")
     np.random.seed(seed)
     perm = np.random.permutation(len(ref_df))
@@ -74,9 +74,9 @@ def run_chronos_guard_pipeline(
     
     print(f"Train Split: {len(train_df)} rows | Validation Split: {len(val_df)} rows")
     
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     # Step 3: Train & Calibrate Baseline Classifier
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     print("\n[Step 3] Training Baseline Classifier with Isotonic Calibration...")
     baseline_model, train_meta = train_baseline_model(
         train_df, FEATURE_COLUMNS, TARGET_COLUMN, random_state=seed
@@ -85,9 +85,9 @@ def run_chronos_guard_pipeline(
     print(f"Baseline Model Trained: ROC-AUC = {train_meta['train_auc']:.4f}, "
           f"Brier Loss = {train_meta['train_brier']:.4f}")
     
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     # Step 4: Out-of-Sample Baseline Evaluation on Validation Set
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     print("\n[Step 4] Evaluating Baseline on Held-Out Validation Set...")
     val_X = val_df[FEATURE_COLUMNS].values
     val_y = val_df[TARGET_COLUMN].values
@@ -109,9 +109,9 @@ def run_chronos_guard_pipeline(
     ref_X = ref_df[FEATURE_COLUMNS].values
     ref_y = ref_df[TARGET_COLUMN].values
     
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     # Step 5: Stream Processing across Analysis Batches
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     analysis_batches = [
         "T1_Normal", "T2_Gradual_Drift", "T3_Sudden_Shock", "T4_Concept_Drift"
     ]
@@ -169,7 +169,7 @@ def run_chronos_guard_pipeline(
         # 5h. Adaptive Retraining Simulation
         retrain_result = None
         if cost_decision["should_retrain"]:
-            print(f"  → Triggering automated retraining pipeline...")
+            print(f"  [+] Triggering automated retraining pipeline...")
             retrain_result = execute_retraining_pipeline(
                 reference_df=ref_df,
                 drifted_df=curr_df,
@@ -180,7 +180,7 @@ def run_chronos_guard_pipeline(
             # Remove non-serializable model from JSON report
             retrain_result.pop("retrained_model", None)
             
-        # ── Print Summary ──
+        # -- Print Summary --
         print(f"  Drift:  Max PSI = {max_psi:.4f} ({top_drift_feature}) | "
               f"MMD = {multi_eval['mmd_score']:.4f} | Adv-AUC = {adv_eval['adversarial_auc']:.4f}")
         print(f"  Perf:   CBPE AUC = {cbpe_metrics['estimated_auc']:.4f} | "
@@ -209,9 +209,9 @@ def run_chronos_guard_pipeline(
         }
         batch_results.append(batch_record)
         
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     # Step 6: Export Telemetry
-    # ──────────────────────────────────────────────
+    # ----------------------------------------------
     combined_uni_df = pd.concat(univariate_all, ignore_index=True)
     combined_uni_df.to_csv(
         os.path.join(output_dir, "univariate_drift_matrix.csv"), index=False

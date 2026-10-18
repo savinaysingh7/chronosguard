@@ -9,7 +9,7 @@ import os
 import numpy as np
 import pandas as pd
 from sklearn.datasets import fetch_openml
-from typing import Dict
+from typing import Dict, Tuple
 
 def generate_all_periods(save_dir: str = "data/raw", seed: int = 42) -> Dict[str, pd.DataFrame]:
     """
@@ -123,5 +123,110 @@ def generate_all_periods(save_dir: str = "data/raw", seed: int = 42) -> Dict[str
         
     return batches
 
+def generate_credit_batch(
+    n_samples: int = 2500,
+    batch_name: str = "Custom_Simulated_Stream",
+    period_id: int = 99,
+    covariate_drift_factor: float = 0.5,
+    shock_factor: float = 0.0,
+    concept_drift_factor: float = 0.0,
+    seed: int = 42,
+    **kwargs
+) -> pd.DataFrame:
+    covariate_drift_factor = kwargs.get("covariate_drift", covariate_drift_factor)
+    concept_drift_factor = kwargs.get("concept_drift", concept_drift_factor)
+    """
+    Generate a synthetic credit batch for live drift simulation.
+    Applies custom drift parameters to create realistic shifted distributions.
+    
+    Args:
+        n_samples: Number of samples to generate
+        batch_name: Name identifier for this batch
+        period_id: Period ID for tracking
+        covariate_drift_factor: Magnitude of covariate shift (0-2.0)
+        shock_factor: Magnitude of macro shock / unemployment impact (0-2.0)
+        concept_drift_factor: Probability of structural default shift (0-2.0)
+        seed: Random seed for reproducibility
+    
+    Returns:
+        DataFrame with simulated credit data and applied drift
+    """
+    rng = np.random.default_rng(seed)
+    
+    # Generate synthetic data with realistic credit distributions
+    credit_score = np.clip(
+        650 + rng.normal(0, 80, size=n_samples) - (covariate_drift_factor * 30) - (shock_factor * 50),
+        320, 850
+    ).round(0)
+    
+    annual_income = np.clip(
+        50000 + rng.normal(0, 20000, size=n_samples) - (shock_factor * 15000),
+        15000, 250000
+    ).round(-2)
+    
+    debt_to_income = np.clip(
+        0.25 + (covariate_drift_factor * 0.15) + rng.normal(0, 0.08, size=n_samples) + (shock_factor * 0.1),
+        0.05, 0.75
+    ).round(3)
+    
+    loan_amount = np.clip(
+        15000 + rng.normal(0, 8000, size=n_samples) + (covariate_drift_factor * 5000),
+        1000, 40000
+    ).round(-2)
+    
+    interest_rate = np.clip(
+        0.12 + (covariate_drift_factor * 0.05) + (shock_factor * 0.03) + rng.normal(0, 0.02, size=n_samples),
+        0.05, 0.32
+    ).round(4)
+    
+    employment_length = np.clip(
+        (rng.integers(0, 30, size=n_samples)) - (shock_factor * 3),
+        0, 15
+    ).astype(int)
+    
+    revolving_utilization = np.clip(
+        0.35 + (covariate_drift_factor * 0.2) + rng.normal(0, 0.1, size=n_samples) + (shock_factor * 0.1),
+        0.02, 0.98
+    ).round(3)
+    
+    delinquencies_2yrs = np.clip(
+        rng.poisson(0.5 + shock_factor * 1.5, size=n_samples) + (covariate_drift_factor * 0.5),
+        0, 6
+    ).astype(int)
+    
+    # Default probability depends on multiple factors
+    base_default_prob = 0.15
+    default_prob = np.clip(
+        base_default_prob + (concept_drift_factor * 0.25) + (shock_factor * 0.15) + (covariate_drift_factor * 0.1),
+        0.05, 0.60
+    )
+    is_default = (rng.random(n_samples) < default_prob).astype(int)
+    
+    # Create DataFrame
+    sim_df = pd.DataFrame({
+        "credit_score": credit_score,
+        "annual_income": annual_income,
+        "debt_to_income": debt_to_income,
+        "loan_amount": loan_amount,
+        "interest_rate": interest_rate,
+        "employment_length": employment_length,
+        "revolving_utilization": revolving_utilization,
+        "delinquencies_2yrs": delinquencies_2yrs,
+        "is_default": is_default
+    })
+    
+    # Add metadata attributes
+    sim_df["batch_id"] = period_id
+    sim_df["batch_name"] = batch_name
+    sim_df.attrs["description"] = f"Simulated stream with covariate_drift={covariate_drift_factor}, shock={shock_factor}, concept_drift={concept_drift_factor}"
+    sim_df.attrs["date_range"] = "Simulated"
+    
+    return sim_df
+
+# Alias for backward compatibility
+generate_stream_batch = generate_credit_batch
+generate_simulated_stream_batch = generate_credit_batch
+
 if __name__ == "__main__":
     generate_all_periods()
+

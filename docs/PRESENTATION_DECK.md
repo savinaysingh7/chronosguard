@@ -1,6 +1,6 @@
 # ChronosGuard: Presentation Slide Deck (10–15 Minutes)
 
-**Title:** Beyond Deployment: Automated Data Drift Detection and Cost-Aware Model Decay Mitigation  
+**Title:** Beyond Deployment: Automated Data Drift Detection, Conformal Uncertainty, and Cost-Aware Model Decay Mitigation  
 **Author:** Capstone Candidate  
 **Target Audience:** Academic Committee, Lead MLOps Engineers, Head of Data Science, Chief Risk Officer  
 **Duration:** 12–15 Minutes (10 min presentation + 5 min Q&A)
@@ -12,144 +12,177 @@
 * **Subtitle:** Protecting Production Machine Learning Models from Silent Failure
 * **Presenter:** Capstone Final Defense
 * **Opening Hook:**
-  > *"In enterprise ML, training a model is only 10% of the journey. The remaining 90% is keeping it alive and accurate in a changing world. A model that is 92% accurate today can quietly bleed millions tomorrow—without throwing a single system exception. This project is about how we detect and fix that silent failure."*
+  > *"In enterprise ML, training a model is only 10% of the journey. The remaining 90% is keeping it alive and reliable in a changing world. A model that is 92% accurate today can quietly bleed millions tomorrow—without throwing a single exception. ChronosGuard detects, explains, and autonomously fixes that silent failure."*
 
 ---
 
 ## Slide 2: The Core Problem — Why Machine Learning Models Decay
 * **Bullet Points:**
   - Machine learning assumes stationary data ($P_{train}(X, Y) \approx P_{prod}(X, Y)$).
-  - Real-world environments change: inflation, economic cycles, competitor behavior, demographic shifts.
-  - Standard monitoring checks API uptime and latency (200 OK), but misses **silent statistical decay**.
+  - Real-world environments change: inflation, economic shocks, competitor moves, sensor degradation.
+  - Standard DevOps checks server uptime and latency (HTTP 200 OK), completely missing **silent statistical model decay**.
 * **Visual Diagram:**
-  - Production Pipeline $\to$ API responds with 200 OK $\to$ Predictions silently degrade $\to$ Cumulative losses.
+  - Production Pipeline $\to$ API responds with 200 OK $\to$ Predictions silently degrade $\to$ Cumulative financial loss.
 * **Speaker Notes:**
-  - Traditional DevOps monitors server uptime and latency. MLOps must monitor distribution stability.
+  - Traditional DevOps monitors infrastructure uptime. MLOps must monitor distribution stability and predictive validity.
 
 ---
 
-## Slide 3: Types of Drift — The Technical Landscape
+## Slide 3: Types of Drift & The Label Delay Problem
 * **Bullet Points:**
-  - **Covariate Shift (Data Drift):** $P(X)$ changes while $P(Y|X)$ remains constant.  
+  - **Covariate Shift (Data Drift):** $P(X)$ changes while $P(Y \mid X)$ remains invariant.  
     *(e.g., Inflation increases Debt-to-Income ratios across applicants).*
-  - **Concept Drift:** $P(Y|X)$ changes while $P(X)$ is stable.  
-    *(e.g., Borrower risk appetite or default propensity shifts under new economic regimes).*
-  - **Label Delay Problem:** In credit lending, defaults take 90–180 days to realize. By the time labels arrive, the financial loss is already incurred.
+  - **Concept Drift:** $P(Y \mid X)$ changes while $P(X)$ appears normal.  
+    *(e.g., Borrower repayment behavior shifts under new macro regimes).*
+  - **The Label Delay Dilemma:** In credit lending, default outcomes take 90–180 days to realize. By the time labels arrive, financial losses are already booked on the balance sheet.
 * **Speaker Notes:**
-  - Emphasize the core dilemma: How do you measure decay *today* if ground-truth labels don't arrive for 3 months?
+  - How do you measure decay *today* if the answer key ($Y$) does not arrive for 3 to 6 months?
 
 ---
 
 ## Slide 4: Capstone Objectives & Architectural Blueprint
-* **Key Deliverables:**
-  1. Synthetic multi-period streaming engine ($T_0$ baseline through $T_4$ concept drift).
-  2. Multi-tier statistical and machine learning drift detector suite.
-  3. Label-free performance estimation via CBPE.
-  4. Cost-aware automated retraining trigger.
-  5. Interactive Streamlit monitoring and mitigation dashboard.
-* **Architecture Diagram:**
-  - `Stream Ingest` $\to$ `Calibrated Model` $\to$ `Drift Suite (PSI/MMD/Adversarial)` + `CBPE Engine` $\to$ `Cost-Benefit Optimizer` $\to$ `Adaptive Retrain`.
+* **Key Innovations:**
+  1. **Multi-Tier Drift Detection Suite:** Univariate (PSI, KS, Wasserstein) + Multivariate (MMD RBF Kernel) + Adversarial Domain AUC.
+  2. **SHAP Root-Cause Attribution:** Quantifies which features drove the drift and whether they pushed predictions toward risk or safety.
+  3. **Split Conformal Prediction:** $(1 - \alpha)$ distribution-free uncertainty intervals that visibly widen under distribution shift.
+  4. **Label-Free Performance Estimation (CBPE):** Predicts ROC-AUC, F1, and accuracy from calibrated probabilities without ground-truth labels.
+  5. **Real-World Live Streaming Daemon:** Continuously ingests 24/7 ticks from public APIs (Binance Crypto & Open-Meteo Grid) in background.
+  6. **Cost-Aware Mitigation Engine:** Balances decay loss ($C_{FN}, C_{FP}$) against retraining expense ($C_{retrain}$) to guarantee positive net ROI.
 
 ---
 
 ## Slide 5: Multi-Tier Drift Detection Suite
 * **Method Comparison:**
   - **Univariate Statistical:**
-    - *Population Stability Index (PSI):* Quantile binning distance. $PSI < 0.1$ stable, $> 0.2$ drift.
-    - *Two-Sample Kolmogorov-Smirnov (KS):* Tests CDF differences ($D > 0.15, p < 0.01$).
-    - *Normalized Wasserstein Distance:* Physical earth mover distance.
-  - **Multivariate / Non-Linear:**
-    - *Maximum Mean Discrepancy (MMD):* RBF kernel distance in RKHS with permutation significance testing.
-  - **Model-Based (Adversarial Discriminator):**
-    - Trains a classifier to distinguish reference vs. stream ($AUC > 0.65$ detects joint shift).
+    - *Population Stability Index (PSI):* Quantile binning distance. $PSI < 0.1$ stable, $> 0.25$ critical drift.
+    - *Two-Sample Kolmogorov-Smirnov (KS):* Tests cumulative distribution differences ($D > 0.15, p < 0.01$).
+    - *Normalized Wasserstein Distance:* Earth mover distance measuring physical shift magnitude.
+  - **Multivariate Non-Linear:**
+    - *Maximum Mean Discrepancy (MMD):* Gaussian RBF kernel distance in RKHS with permutation significance testing.
+  - **Model-Based Discriminator (Adversarial AUC):**
+    - Trains a classifier to distinguish reference vs. stream ($AUC > 0.70$ warning, $> 0.85$ critical).
 * **Speaker Notes:**
-  - Explain why univariate alone is insufficient: cross-feature covariance shifts can slip past 1D tests.
+  - Univariate tests evaluate features in isolation. MMD and Adversarial AUC preserve joint multivariate interactions.
 
 ---
 
-## Slide 6: Innovation 1 — Label-Free Performance Estimation (CBPE)
+## Slide 6: Innovation 1 — Split Conformal Prediction & Distribution-Free Sets
+* **The Core Limitation of Standard ML:** Models produce overconfident probabilities $\hat{p}(x)$ that fail silently under distribution shift.
+* **Conformal Guarantee:**
+  - Implements inductive split conformal prediction calibrated at $1 - \alpha = 90\%$.
+  - Non-conformity score: $s_i = 1 - \hat{P}(Y = y_i \mid x_i)$.
+  - Conformal quantile: $\hat{q} = \text{Quantile}(\{s_i\}, \lceil(n+1)(1-\alpha)\rceil / n)$.
+  - Prediction set: $C(x) = \{y \in \{0, 1\} : 1 - \hat{P}(Y = y \mid x) \le \hat{q}\}$.
+* **Empirical Validation (30k UCI Credit Records):**
+  - $T_1$ Nominal: Mean Set Size = **1.336**, Empirical Coverage = **91.72%** ($\ge 90\%$ guarantee holds).
+  - $T_2$ Gradual Shift: Mean Set Size = **1.322**, Empirical Coverage = **91.50%** (Holds).
+  - $T_3$ Sudden Shock: Mean Set Size = **1.345**, Empirical Coverage = **90.93%** (Holds).
+  - $T_4$ Concept Drift: Exchangeability broken $\to$ Empirical Coverage plummets to **77.30%**!
+* **Speaker Notes:**
+  - Conformal prediction provides distribution-free proof of model breakdown: when coverage drops below $1 - \alpha$, the model's statistical validity has expired.
+
+---
+
+## Slide 7: Innovation 2 — SHAP Root-Cause Explainability
+* **Moving from "What drifted?" to "Why did it drift?":**
+  - Drift metrics ring the alarm; SHAP explains the culprit.
+  - Calculates marginal attribution shift $\Delta |\text{SHAP}|$ and directional push $\mathbb{E}[S_{curr}] - \mathbb{E}[S_{ref}]$.
+* **Empirical Shock Findings ($T_3$ Recession vs $T_0$ Baseline):**
+  - Top Drift Driver: `interest_rate` ($\Delta |\text{SHAP}| = +0.0679$, Directional Push: $+0.0712 \to$ **Increased Risk**).
+  - Secondary Driver: `credit_score` ($\Delta |\text{SHAP}| = +0.0274$, Directional Push: $+0.0289 \to$ **Increased Risk**).
+  - Sample-Level Drilldown: Inspect individual borrowers with dynamic waterfall plots showing exact feature contributions.
+
+---
+
+## Slide 8: Innovation 3 — Label-Free Performance Estimation (CBPE)
 * **The Solution:** Confidence-Based Performance Estimation.
 * **The Math:**
-  - Uses probability-calibrated predictions ($p_i = P(Y=1|X_i)$).
-  - Computes expected confusion matrix: $E[TP] = \sum_{\hat{y}=1} p_i$, $E[FP] = \sum_{\hat{y}=1} (1-p_i)$, etc.
-  - Derives $E[\text{Accuracy}], E[F1], E[\text{ROC-AUC}]$ without ground-truth labels.
+  - Uses probability-calibrated predictions ($p_i = \hat{P}(Y=1 \mid X_i)$).
+  - Computes expected confusion matrix: $\mathbb{E}[TP] = \sum_{\hat{y}=1} p_i$, $\mathbb{E}[FP] = \sum_{\hat{y}=1} (1-p_i)$, etc.
+  - Derives $\mathbb{E}[\text{Accuracy}], \mathbb{E}[F1], \mathbb{E}[\text{ROC-AUC}]$ without ground-truth labels.
 * **Empirical Validation:**
-  - Tracks true ROC-AUC within a **$0.017$ margin** during covariate shifts.
+  - Tracks true ROC-AUC within a **$0.018$ margin** during covariate shifts ($< 0.0004$ under macroeconomic shock).
 * **Speaker Notes:**
-  - This solves the 90-day label delay. The MLOps engineer has visibility on Day 1.
+  - Solves the 90-day label delay. The MLOps engineer detects decay on Day 1.
 
 ---
 
-## Slide 7: Innovation 2 — Cost-Aware Mitigation Strategy
+## Slide 9: Innovation 4 — Cost-Aware Mitigation Strategy
 * **The Flaw of Standard MLOps:** Naive rule: *"If PSI > 0.2, trigger retraining."*
-  - Retraining consumes compute resources, developer hours, and requires compliance auditing.
+  - Retraining consumes compute resources, developer hours, and requires compliance audits.
 * **ChronosGuard Cost Matrix:**
   $$\text{Loss} = FP \times \$250 + FN \times \$6,500$$
   $$\text{Net ROI} = \text{Decay Loss} - C_{retrain}$$
 * **Decision Rule:** Retrain only when Net Expected ROI is positive.
-* **Results:** Avoids unnecessary retrain churn in benign drift, while securing **$9.5\times$ to $57\times$ ROI** in critical shocks.
+* **Results:** Avoids retrain churn under benign shifts, while securing **$9.5\times$ to $57\times$ ROI** in critical shocks.
+* **Catastrophic Loss Prevention:** Sliding-window retraining slashed false negatives from **2,030 down to 620**, saving **\$3.25M+** in default losses.
 
 ---
 
-## Slide 8: Experimental Setup & Streaming Datasets
-* **Domain:** FinTech Consumer Credit & Default Risk (16,000 records).
-* **Temporal Cohorts:**
-  - **$T_0$ Reference (6,000):** Baseline training distribution.
-  - **$T_1$ Production (2,500):** Normal stochastic variation.
-  - **$T_2$ Gradual Shift (2,500):** Rising inflation and debt-to-income.
-  - **$T_3$ Sudden Shock (2,500):** Macroeconomic liquidity crisis and credit score plunge.
-  - **$T_4$ Concept Drift (2,500):** Structural shift in default propensity $P(Y|X)$.
+## Slide 10: Innovation 5 — Real-Time Live Streaming & Autonomous Daemon
+* **Real Live Data Feeds (Zero API Keys Required):**
+  1. **🪙 Binance Crypto Market Flow (BTC/ETH 24/7):** High-frequency risk, volatility, order flow imbalance.
+  2. **⚡ Open-Meteo Environmental Grid (NYC/London):** Atmospheric pressure, temperature, solar flux.
+* **Autonomous Background Daemon (`src/live/daemon.py`):**
+  - Ingests ticks continuously in the background into an SQLite datastore with Write-Ahead Logging (WAL).
+  - Evaluates rolling Univariate PSI, Multivariate MMD, Adversarial AUC, and Conformal Set Sizes every 15 ticks.
+  - **Zero-Downtime Hot Retraining:** When decay ROI threshold is breached, daemon retrains and hot-swaps active model and calibrators in memory with zero downtime.
 
 ---
 
-## Slide 9: Empirical Findings & Sensitivity Benchmark
-* **Key Results Table:**
-  - $T_1$ Normal: Max PSI = 0.008, MMD = 0.004, Status: **STABLE**.
-  - $T_2$ Gradual: Max PSI = 0.143, MMD = 0.058, Adv-AUC = 0.684, Status: **WARNING**.
-  - $T_3$ Sudden: Max PSI = 0.489, MMD = 0.182, Adv-AUC = 0.892, Status: **CRITICAL DRIFT**.
-  - $T_4$ Concept: Max PSI = 0.041 (Covariate blind spot!), CBPE divergence detects shift.
-* **Takeaway:** MMD and Adversarial AUC provide early warning before individual feature PSIs breach critical thresholds.
+## Slide 11: Stream Physics — Crypto Market Flow vs. Environmental Grid
+* **🪙 Financial Market Stream (Binance):**
+  - *Distribution:* Heavy-tailed, non-stationary random walk.
+  - *Drift Type:* **Reflexive Concept Drift** ($P(Y \mid X)$ shifts due to participant psychology).
+  - *Resolution:* Fast ground truth (15s–5m). Target: Realized volatility spike.
+* **⚡ Environmental Grid Stream (Open-Meteo):**
+  - *Distribution:* Bounded physical diurnal cycles.
+  - *Drift Type:* **Covariate Drift** ($P(X_{solar})$ shifts day-to-night while physical laws $P(Y \mid X)$ remain invariant).
+  - *Resolution:* Hourly meteorological intervals. Target: Peak demand / renewable deficit.
+* **Side-by-Side Dual Stream Mode:** Synchronized comparative monitoring in the Vanguard Live Stream Ops Center.
 
 ---
 
-## Slide 10: Mitigation Impact & Model Recovery
-* **Before Retraining (Decayed State):**
-  - Sudden Shock ($T_3$): ROC-AUC dropped from $0.894 \to 0.768$; F1 dropped to $0.495$.
-  - Operational Decay Loss: **+\$58,750 per batch**.
-* **After ChronosGuard Adaptive Retraining:**
-  - ROC-AUC recovered to **$0.871$** (+0.103 gain).
-  - F1 recovered to **$0.642$**.
-  - Net Economic Savings: **+\$57,250** per batch.
+## Slide 12: Executive Onboarding — The Beginner's Guide (ELI5)
+* **Explaining Model Decay to Non-Technical Stakeholders:**
+  - **🚗 The California Tesla in a Boston Blizzard:** The cameras work, but the world changed ($P(X)$ Covariate Shift).
+  - **♟️ Changing Rules of Chess:** The pieces look identical, but pawns now move backward ($P(Y \mid X)$ Concept Drift).
+  - **🏥 ER Doctor Without Lab Tests:** Monitoring vital signs while waiting for blood test results (Label-Free CBPE).
+  - **❓ The "I Don't Know" Button:** Conformal prediction outputs honest prediction sets instead of reckless guesses.
+  - **🎛️ Interactive 'Shift the World' Simulator:** Visualizes model decay, financial bleed, and automated mitigation in real time.
 
 ---
 
-## Slide 11: Live System Demo Walkthrough
-* **Streamlit Application Showcase:**
-  - Tab 1: Executive KPI Dashboard & multi-period trajectory.
-  - Tab 2: Univariate Distribution overlays and quantile binning.
-  - Tab 3: MMD permutation test and Adversarial feature ranking.
-  - Tab 4: Real-time CBPE curves vs. ground-truth comparisons.
-  - Tab 5: Cost-aware interactive calculator & one-click retrain simulator.
-  - Tab 6: Real-time synthetic shock injection sandbox.
+## Slide 13: Live Interactive Operations Console Showcase
+* **ChronosGuard Vanguard Command Center (`http://localhost:3000`):**
+  - **🛡️ View 1: Executive Command Center:** Dynamic health indicator, multi-period decay trajectory, and KPI matrix.
+  - **🔴 View 2: Live Stream Ops Center:** Real 24/7 Binance crypto & Open-Meteo live surveillance with SQLite WAL persistence.
+  - **🔍 View 3: SHAP Root-Cause Studio:** Global $\Delta |\text{SHAP}|$ attribution shifts, directional push, and borrower waterfall inspector.
+  - **🎯 View 4: Split Conformal Prediction Lab:** Distribution-free 90% finite-sample uncertainty sets and empirical coverage breakdown.
+  - **📊 View 5: Cohort Drift Detection Suite:** Univariate PSI/KS scorecard, multivariate MMD distance, and adversarial AUC.
+  - **💰 View 6: Cost-Aware Mitigation & Retraining ROI:** Asymmetric loss sliders ($C_{FN}, C_{FP}$) with 60fps client-side calculation and 1-click retraining.
+  - **🎓 View 7: Beginner's Intuition & Sandbox (ELI5):** Jargon-free real-world stories and interactive synthetic drift simulator.
 
 ---
 
-## Slide 12: Conclusion & Business Value
+## Slide 14: Conclusion & Business Value
 * **Summary of Contributions:**
-  1. Built an end-to-end drift monitoring and mitigation framework.
-  2. Implemented label-free performance estimation (CBPE), solving the label-delay dilemma.
-  3. Formulated a cost-aware retraining policy ensuring positive business ROI.
-  4. Delivered a production-ready Streamlit monitoring console.
+  1. Built an end-to-end multi-tier drift detection framework (Univariate, MMD, Adversarial).
+  2. Implemented label-free performance estimation (CBPE) tracking decay within $<0.018$ error without labels.
+  3. Integrated Split Conformal Prediction delivering distribution-free $(1 - \alpha)$ guarantees.
+  4. Added SHAP explainability attributing root causes and directional push.
+  5. Engineered an autonomous 24/7 background streaming daemon with synchronized dual stream mode.
+  6. Tested thoroughly with **34/34 passing unit and integration tests**.
 * **Closing Statement:**
-  > *"ChronosGuard transforms MLOps from reactive firefighting into proactive, economically optimized model risk management."*
+  > *"ChronosGuard transforms MLOps from reactive firefighting into proactive, autonomous, and economically optimized model reliability management."*
 * **Open for Questions.**
 
 ---
 
-## Slide 13: Appendix & Anticipated Committee Q&A
-* **Q1: Why does CBPE underestimate decay during Concept Drift ($T_4$)?**
-  - *Answer:* CBPE assumes the mapping $P(Y|X)$ learned by the calibrated model remains stable while $P(X)$ shifts. When $P(Y|X)$ changes structurally, CBPE's predictions diverge from ground truth. This divergence itself serves as an indicator of Concept Drift.
+## Slide 15: Appendix & Anticipated Committee Q&A
+* **Q1: Why does conformal coverage collapse under Concept Drift ($T_4$)?**
+  - *Answer:* Conformal prediction guarantees valid marginal coverage under the assumption of exchangeability ($P_{train} \equiv P_{prod}$). Concept drift explicitly violates exchangeability, causing empirical coverage to drop to 77.30%. This breakdown provides mathematical proof of decay.
 * **Q2: Why use MMD over multiple KS-tests with Bonferroni correction?**
-  - *Answer:* Bonferroni-corrected KS tests treat features as independent marginals, diluting statistical power when features covary. MMD operates directly in RKHS, preserving multivariate joint distributions.
+  - *Answer:* Bonferroni-corrected univariate tests assume feature independence, losing statistical power when features covary. MMD operates directly in Reproducing Kernel Hilbert Space, capturing higher-order non-linear dependencies.
 * **Q3: How does the sliding-window retraining prevent catastrophic forgetting?**
-  - *Answer:* The retraining engine blends the historical reference pool ($T_0$) with the drifted cohort ($T_i$), preserving core decision boundaries while adapting to distribution shifts.
+  - *Answer:* The retrainer blends the reference dataset ($T_0$) with the recent drifted window ($T_i$), preserving fundamental boundaries while adapting to shifted distributions.

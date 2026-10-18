@@ -39,9 +39,15 @@ models/
 # Pytest
 .pytest_cache/
 
-# Streamlit
-.streamlit/
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
 
 # Misc
 *.log
 capstone_project.zip
+*.db
+*.db-shm
+*.db-wal
+

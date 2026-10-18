@@ -1,0 +1,509 @@
+"""
+ChronosGuard Backend API
+Comprehensive REST API for real-time live streaming, multi-tier drift detection,
+conformal prediction uncertainty, SHAP explainability, and cost-aware model decay mitigation.
+"""
+
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import os
+import sys
+import json
+import numpy as np
+import pandas as pd
+from typing import Dict, Any
+
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# Import ChronosGuard core modules
+from data.generator import generate_all_periods, generate_credit_batch
+from src.model.trainer import train_baseline_model, save_model, load_model, FEATURE_COLUMNS, TARGET_COLUMN
+from src.model.evaluator import evaluate_predictions
+from src.model.conformal import ConformalPredictionClassifier
+from src.drift.univariate import evaluate_univariate_drift
+from src.drift.multivariate import evaluate_multivariate_drift
+from src.drift.adversarial import evaluate_adversarial_drift
+from src.drift.cbpe import estimate_metrics_cbpe
+from src.drift.explainability import compute_shap_drift_attribution, explain_single_sample
+from src.mitigation.cost_model import evaluate_retraining_decision, evaluate_retraining_from_costs, calculate_operational_cost
+from src.mitigation.retrainer import execute_retraining_pipeline
+from src.live.controller import start_daemon, stop_daemon, get_daemon_status
+from src.live.storage import LiveStreamStorage
+
+app = Flask(__name__)
+CORS(app)  # Enable CORS for modern web frontend
+
+# Global state to store initialized system
+system_state = {
+    'batches': None,
+    'baseline_model': None,
+    'conformal_calibrator': None,
+    'ref_eval': None,
+    'ref_cbpe': None,
+    'baseline_fpr': None,
+    'baseline_fnr': None,
+    'ref_df': None,
+    'initialized': False
+}
+
+def auto_init_system(seed=42):
+    """Automatically initializes the baseline system if not already initialized"""
+    if system_state['initialized']:
+        return
+    print("Auto-initializing ChronosGuard Engine...")
+    batches = generate_all_periods(save_dir="data/raw", seed=seed)
+    ref_df = batches["T0_Reference"]
+    
+    np.random.seed(seed)
+    perm = np.random.permutation(len(ref_df))
+    split_idx = int(0.8 * len(ref_df))
+    train_df = ref_df.iloc[perm[:split_idx]].copy().reset_index(drop=True)
+    val_df = ref_df.iloc[perm[split_idx:]].copy().reset_index(drop=True)
+    
+    model, train_meta = train_baseline_model(train_df, FEATURE_COLUMNS, TARGET_COLUMN, random_state=seed)
+    
+    val_X = val_df[FEATURE_COLUMNS].values
+    val_y = val_df[TARGET_COLUMN].values
+    val_probs = model.predict_proba(val_X)[:, 1]
+    val_eval = evaluate_predictions(val_y, val_probs)
+    val_cbpe = estimate_metrics_cbpe(val_probs)
+    
+    # Calibrate split conformal predictor on validation split (90% target coverage)
+    calibrator = ConformalPredictionClassifier(model, alpha=0.10)
+    calibrator.calibrate(val_X, val_y)
+    
+    n_val_neg = val_eval["tn"] + val_eval["fp"]
+    n_val_pos = val_eval["tp"] + val_eval["fn"]
+    baseline_fpr = val_eval["fp"] / n_val_neg if n_val_neg > 0 else 0.0
+    baseline_fnr = val_eval["fn"] / n_val_pos if n_val_pos > 0 else 0.0
+    
+    system_state['batches'] = batches
+    system_state['baseline_model'] = model
+    system_state['conformal_calibrator'] = calibrator
+    system_state['ref_eval'] = val_eval
+    system_state['ref_cbpe'] = val_cbpe
+    system_state['baseline_fpr'] = baseline_fpr
+    system_state['baseline_fnr'] = baseline_fnr
+    system_state['ref_df'] = ref_df
+    
+    # Precompute deterministic trajectory across batches once
+    batch_order = ["T0_Reference", "T1_Normal", "T2_Gradual_Drift", "T3_Sudden_Shock", "T4_Concept_Drift"]
+    traj_records = []
+    for b_name in batch_order:
+        b_df = batches[b_name]
+        b_X = b_df[FEATURE_COLUMNS].values
+        b_y = b_df[TARGET_COLUMN].values
+        b_p = model.predict_proba(b_X)[:, 1]
+        b_gt = evaluate_predictions(b_y, b_p)
+        b_cbpe = estimate_metrics_cbpe(b_p)
+        b_uni = evaluate_univariate_drift(ref_df, b_df, FEATURE_COLUMNS)
+        b_conf = calibrator.evaluate_batch(b_X, b_y)
+        traj_records.append({
+            "period": b_name,
+            "realized_auc": b_gt["roc_auc"],
+            "cbpe_auc": b_cbpe["estimated_auc"],
+            "max_psi": float(b_uni["psi"].max()),
+            "default_rate": b_gt["default_rate"],
+            "conformal_set_size": b_conf["mean_set_size"],
+            "empirical_coverage": b_conf["empirical_coverage"]
+        })
+    system_state['trajectory_records'] = traj_records
+    system_state['initialized'] = True
+    print(f"ChronosGuard Engine ready. Baseline AUC={val_eval['roc_auc']:.4f}, Conformal q={calibrator.conformal_quantile:.4f}")
+
+@app.route('/', methods=['GET'])
+def index():
+    """Root landing endpoint with system status and frontend link"""
+    return jsonify({
+        'service': 'ChronosGuard Vanguard REST API',
+        'status': 'healthy',
+        'version': '2.0.0',
+        'frontend_url': 'http://localhost:3000',
+        'endpoints': {
+            'health': '/health',
+            'cohorts': '/api/cohorts',
+            'analyze': '/api/analyze/<batch_key>',
+            'shap_explain': '/api/shap/explain/<batch_key>',
+            'shap_sample': '/api/shap/sample/<batch_key>/<sample_idx>',
+            'conformal_cohorts': '/api/conformal/cohorts',
+            'live_status': '/api/live/status',
+            'live_dual': '/api/live/dual',
+            'retrain': '/api/retrain',
+            'simulate': '/api/simulate'
+        }
+    })
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'ChronosGuard Backend API',
+        'version': '2.0.0',
+        'initialized': system_state['initialized']
+    })
+
+@app.route('/api/initialize', methods=['POST'])
+def initialize_system():
+    """Explicitly initializes the system"""
+    try:
+        data = request.get_json() or {}
+        seed = data.get('seed', 42)
+        system_state['initialized'] = False
+        auto_init_system(seed=seed)
+        return jsonify({
+            'success': True,
+            'message': 'ChronosGuard system initialized successfully',
+            'baseline_auc': system_state['ref_eval']['roc_auc'],
+            'baseline_f1': system_state['ref_eval']['f1']
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/cohorts', methods=['GET'])
+def list_cohorts():
+    """Lists available historical batches and their metadata"""
+    auto_init_system()
+    batch_options = {
+        "T0_Reference": {"name": "T0: Reference Training Baseline", "scenario": "Baseline nominal credit environment", "period": "Q1 2023"},
+        "T1_Normal": {"name": "T1: In-Distribution Production Stream", "scenario": "Normal production sampling variance (nominal)", "period": "Q2 2023"},
+        "T2_Gradual_Drift": {"name": "T2: Gradual Covariate Shift", "scenario": "Rising inflation and creeping debt-to-income", "period": "Q3 2023"},
+        "T3_Sudden_Shock": {"name": "T3: Sudden Macroeconomic Shock", "scenario": "Severe liquidity crisis and interest rate spike", "period": "Q4 2023"},
+        "T4_Concept_Drift": {"name": "T4: Structural Concept Drift", "scenario": "Structural shift in default propensity P(Y|X)", "period": "Q1 2024"}
+    }
+    return jsonify({'success': True, 'cohorts': batch_options})
+
+_cohort_analysis_cache = {}
+_shap_analysis_cache = {}
+
+@app.route('/api/analyze/<batch_key>', methods=['GET'])
+def analyze_batch(batch_key):
+    """Deep analysis of a specific cohort: Univariate, Multivariate, Adversarial, CBPE, Conformal"""
+    try:
+        if batch_key in _cohort_analysis_cache:
+            return jsonify(_cohort_analysis_cache[batch_key])
+
+        auto_init_system()
+        if batch_key not in system_state['batches']:
+            return jsonify({'success': False, 'error': f'Batch {batch_key} not found'}), 404
+            
+        current_df = system_state['batches'][batch_key]
+        curr_X = current_df[FEATURE_COLUMNS].values
+        curr_y = current_df[TARGET_COLUMN].values
+        curr_probs = system_state['baseline_model'].predict_proba(curr_X)[:, 1]
+        
+        # Univariate Drift
+        uni_summary = evaluate_univariate_drift(system_state['ref_df'], current_df, FEATURE_COLUMNS)
+        max_psi = float(uni_summary["psi"].max())
+        n_drifted = int((uni_summary["status"] == "DRIFT_DETECTED").sum())
+        
+        # Performance & CBPE
+        cbpe_curr = estimate_metrics_cbpe(curr_probs)
+        gt_curr = evaluate_predictions(curr_y, curr_probs)
+        
+        # Conformal Prediction
+        conformal_eval = system_state['conformal_calibrator'].evaluate_batch(curr_X, curr_y)
+        conformal_eval.pop("prediction_sets", None)
+        conformal_eval.pop("sample_probabilities", None)
+        conformal_eval.pop("uncertainty_bounds", None)
+        
+        # Cost Decision
+        cost_decision = evaluate_retraining_decision(
+            current_fp=gt_curr["fp"],
+            current_fn=gt_curr["fn"],
+            baseline_fp=system_state['baseline_fpr'] * (gt_curr["tn"] + gt_curr["fp"]),
+            baseline_fn=system_state['baseline_fnr'] * (gt_curr["tp"] + gt_curr["fn"]),
+            cost_fp=250.0,
+            cost_fn=6500.0,
+            retrain_expense=1500.0
+        )
+        
+        # Multivariate & Adversarial
+        multi_res = evaluate_multivariate_drift(system_state['ref_df'][FEATURE_COLUMNS].values, curr_X)
+        adv_res = evaluate_adversarial_drift(system_state['ref_df'], current_df, FEATURE_COLUMNS)
+        
+        # Trajectory (slice from precomputed records)
+        traj_records = []
+        for r in system_state.get('trajectory_records', []):
+            traj_records.append(r)
+            if r["period"] == batch_key:
+                break
+                
+        payload = {
+            'success': True,
+            'batch_key': batch_key,
+            'sample_count': len(current_df),
+            'executive_summary': {
+                'system_health': 'STABLE' if max_psi < 0.1 and adv_res["adversarial_auc"] < 0.75 else ('WARNING' if max_psi < 0.25 else 'CRITICAL DRIFT'),
+                'max_psi': max_psi,
+                'drifted_features_count': n_drifted,
+                'total_features': len(FEATURE_COLUMNS),
+                'realized_auc': gt_curr["roc_auc"],
+                'cbpe_estimated_auc': cbpe_curr["estimated_auc"],
+                'realized_f1': gt_curr["f1"],
+                'cbpe_estimated_f1': cbpe_curr["estimated_f1"],
+                'conformal_set_size': conformal_eval["mean_set_size"],
+                'empirical_coverage': conformal_eval["empirical_coverage"]
+            },
+            'cost_analysis': cost_decision,
+            'univariate_drift': uni_summary.to_dict('records'),
+            'multivariate_drift': multi_res,
+            'adversarial_drift': adv_res,
+            'conformal_evaluation': conformal_eval,
+            'trajectory': traj_records,
+            'confusion_matrices': {
+                'realized': {'tp': gt_curr["tp"], 'fp': gt_curr["fp"], 'tn': gt_curr["tn"], 'fn': gt_curr["fn"]},
+                'cbpe_expected': {'tp': cbpe_curr["expected_tp"], 'fp': cbpe_curr["expected_fp"], 'tn': cbpe_curr["expected_tn"], 'fn': cbpe_curr["expected_fn"]}
+            }
+        }
+        _cohort_analysis_cache[batch_key] = payload
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/shap/explain/<batch_key>', methods=['GET'])
+def get_shap_explanation(batch_key):
+    """Computes global SHAP attribution shift comparing reference vs specified batch"""
+    try:
+        if batch_key in _shap_analysis_cache:
+            return jsonify(_shap_analysis_cache[batch_key])
+
+        auto_init_system()
+        if batch_key not in system_state['batches']:
+            return jsonify({'success': False, 'error': f'Batch {batch_key} not found'}), 404
+            
+        curr_df = system_state['batches'][batch_key]
+        shap_res = compute_shap_drift_attribution(
+            model=system_state['baseline_model'],
+            reference_df=system_state['ref_df'],
+            current_df=curr_df,
+            feature_cols=FEATURE_COLUMNS,
+            max_samples=150
+        )
+        
+        attr_df = shap_res["feature_attribution_df"]
+        payload = {
+            'success': True,
+            'batch_key': batch_key,
+            'top_drift_driver': shap_res["top_drift_driver"],
+            'feature_attributions': attr_df.to_dict('records')
+        }
+        _shap_analysis_cache[batch_key] = payload
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/shap/sample/<batch_key>/<int:sample_idx>', methods=['GET'])
+def get_shap_sample_explanation(batch_key, sample_idx):
+    """Computes sample-level SHAP explanation waterfall for a specific borrower"""
+    try:
+        auto_init_system()
+        if batch_key not in system_state['batches']:
+            return jsonify({'success': False, 'error': f'Batch {batch_key} not found'}), 404
+            
+        curr_df = system_state['batches'][batch_key]
+        idx = max(0, min(sample_idx, len(curr_df) - 1))
+        sample_row = curr_df.iloc[idx]
+        
+        sample_exp = explain_single_sample(
+            model=system_state['baseline_model'],
+            sample_series=sample_row,
+            feature_cols=FEATURE_COLUMNS
+        )
+        
+        pred_prob = float(system_state['baseline_model'].predict_proba(sample_row[FEATURE_COLUMNS].values.reshape(1, -1))[0, 1])
+        
+        return jsonify({
+            'success': True,
+            'batch_key': batch_key,
+            'sample_index': idx,
+            'predicted_probability': pred_prob,
+            'top_risk_factor': sample_exp["top_risk_factor"],
+            'explanation': sample_exp["explanation_df"].to_dict('records')
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/conformal/cohorts', methods=['GET'])
+def get_conformal_cohorts():
+    """Returns conformal uncertainty sets and coverage metrics across all timeline cohorts"""
+    try:
+        auto_init_system()
+        batch_order = ["T0_Reference", "T1_Normal", "T2_Gradual_Drift", "T3_Sudden_Shock", "T4_Concept_Drift"]
+        results = []
+        for b_name in batch_order:
+            b_df = system_state['batches'][b_name]
+            b_X = b_df[FEATURE_COLUMNS].values
+            b_y = b_df[TARGET_COLUMN].values
+            eval_res = system_state['conformal_calibrator'].evaluate_batch(b_X, b_y)
+            results.append({
+                "batch": b_name,
+                "mean_set_size": eval_res["mean_set_size"],
+                "singleton_rate": eval_res["singleton_rate"],
+                "ambiguity_rate": eval_res["ambiguity_rate"],
+                "empty_rate": eval_res["empty_rate"],
+                "empirical_coverage": eval_res["empirical_coverage"],
+                "target_coverage": eval_res["target_coverage"],
+                "bandwidth": eval_res["mean_uncertainty_bandwidth"],
+                "status": eval_res["status"]
+            })
+        return jsonify({'success': True, 'cohorts': results})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==========================================
+# REAL-TIME LIVE STREAMING ENDPOINTS
+# ==========================================
+
+@app.route('/api/live/status', methods=['GET'])
+def live_daemon_status():
+    """Returns real-time status of the autonomous background streaming daemon"""
+    try:
+        status_info = get_daemon_status()
+        is_running = (status_info.get('status') == 'RUNNING')
+        return jsonify({'success': True, 'data': status_info, 'running': is_running})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/live/start', methods=['POST'])
+def live_daemon_start():
+    """Starts the autonomous background daemon on a real live stream"""
+    try:
+        data = request.get_json() or {}
+        provider = data.get('provider', 'crypto_btc')
+        interval = float(data.get('interval', 2.5))
+        res = start_daemon(provider_key=provider, interval=interval)
+        return jsonify({'success': True, 'result': res})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/live/stop', methods=['POST'])
+def live_daemon_stop():
+    """Stops the autonomous background streaming daemon"""
+    try:
+        res = stop_daemon()
+        return jsonify({'success': True, 'result': res})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/live/ticks', methods=['GET'])
+def live_recent_ticks():
+    """Returns the most recent live stream ticks recorded in persistent storage"""
+    try:
+        provider = request.args.get('provider', 'crypto_btc')
+        limit = int(request.args.get('limit', 40))
+        storage = LiveStreamStorage()
+        ticks = storage.get_recent_ticks(provider=provider, limit=limit)
+        return jsonify({'success': True, 'count': len(ticks), 'ticks': ticks})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/live/snapshots', methods=['GET'])
+def live_drift_snapshots():
+    """Returns rolling window drift snapshots evaluated on the live stream"""
+    try:
+        provider = request.args.get('provider', 'crypto_btc')
+        limit = int(request.args.get('limit', 30))
+        storage = LiveStreamStorage()
+        snapshots = storage.get_recent_snapshots(provider=provider, limit=limit)
+        return jsonify({'success': True, 'count': len(snapshots), 'snapshots': snapshots})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/live/dual', methods=['GET'])
+def live_dual_telemetry():
+    """Returns synchronized recent ticks and snapshots for both Crypto and Weather streams"""
+    try:
+        limit = int(request.args.get('limit', 20))
+        storage = LiveStreamStorage()
+        c_ticks = storage.get_recent_ticks('crypto_btc', limit=limit)
+        w_ticks = storage.get_recent_ticks('weather_grid_nyc', limit=limit)
+        c_snaps = storage.get_recent_snapshots('crypto_btc', limit=limit)
+        w_snaps = storage.get_recent_snapshots('weather_grid_nyc', limit=limit)
+        
+        return jsonify({
+            'success': True,
+            'crypto': {'ticks': c_ticks, 'snapshots': c_snaps},
+            'weather': {'ticks': w_ticks, 'snapshots': w_snaps}
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/retrain', methods=['POST'])
+def trigger_retraining():
+    """Trigger automated retraining pipeline"""
+    try:
+        auto_init_system()
+        data = request.get_json() or {}
+        batch_key = data.get('batch_key', 'T4_Concept_Drift')
+        cost_fp = data.get('cost_fp', 250.0)
+        cost_fn = data.get('cost_fn', 6500.0)
+        
+        current_df = system_state['batches'][batch_key]
+        retrain_res = execute_retraining_pipeline(
+            reference_df=system_state['ref_df'],
+            drifted_df=current_df,
+            feature_cols=FEATURE_COLUMNS,
+            target_col=TARGET_COLUMN,
+            cost_fp=cost_fp,
+            cost_fn=cost_fn
+        )
+        _cohort_analysis_cache.clear()
+        _shap_analysis_cache.clear()
+        retrain_res.pop("retrained_model", None)
+        return jsonify({'success': True, 'results': retrain_res})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/simulate', methods=['POST'])
+def simulate_drift():
+    """Generate synthetic stream with custom drift parameters"""
+    try:
+        auto_init_system()
+        data = request.get_json() or {}
+        n_samples = data.get('n_samples', 2500)
+        covariate_drift = data.get('covariate_drift', 0.5)
+        shock_factor = data.get('shock_factor', 0.0)
+        concept_drift = data.get('concept_drift', 0.0)
+        
+        sim_df = generate_credit_batch(
+            n_samples=n_samples,
+            batch_name="Custom_Simulated_Stream",
+            period_id=99,
+            covariate_drift_factor=covariate_drift,
+            shock_factor=shock_factor,
+            concept_drift_factor=concept_drift
+        )
+        
+        sim_X = sim_df[FEATURE_COLUMNS].values
+        sim_y = sim_df[TARGET_COLUMN].values
+        sim_p = system_state['baseline_model'].predict_proba(sim_X)[:, 1]
+        
+        sim_uni = evaluate_univariate_drift(system_state['ref_df'], sim_df, FEATURE_COLUMNS)
+        sim_cbpe = estimate_metrics_cbpe(sim_p)
+        sim_gt = evaluate_predictions(sim_y, sim_p)
+        sim_conf = system_state['conformal_calibrator'].evaluate_batch(sim_X, sim_y)
+        
+        return jsonify({
+            'success': True,
+            'simulated_batch': {
+                'default_rate': float(sim_df['is_default'].mean()),
+                'sample_size': len(sim_df),
+                'max_psi': float(sim_uni['psi'].max()),
+                'realized_auc': sim_gt["roc_auc"],
+                'cbpe_estimated_auc': sim_cbpe["estimated_auc"],
+                'conformal_set_size': sim_conf["mean_set_size"],
+                'empirical_coverage': sim_conf["empirical_coverage"]
+            },
+            'univariate_drift': sim_uni[["feature", "psi", "ks_statistic", "status"]].to_dict('records')
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+if __name__ == '__main__':
+    import threading
+    print("Starting ChronosGuard Backend API on port 5000...", flush=True)
+    # Start auto-initialization in a thread so server listens immediately
+    threading.Thread(target=auto_init_system, daemon=True).start()
+    app.run(host='127.0.0.1', port=5000, debug=False)

@@ -50,7 +50,7 @@ def calculate_mmd(
     Y: np.ndarray,
     gamma: Optional[float] = None,
     unbiased: bool = True,
-    subsample: int = 1500
+    subsample: int = 600
 ) -> float:
     """
     Calculates Maximum Mean Discrepancy (MMD) between distributions X and Y using RBF kernel.
@@ -86,7 +86,7 @@ def evaluate_multivariate_drift(
     reference_data: np.ndarray,
     current_data: np.ndarray,
     standardize: bool = True,
-    n_permutations: int = 50
+    n_permutations: int = 15
 ) -> Dict[str, Any]:
     """
     Performs complete multivariate drift evaluation including MMD and statistical significance.
