@@ -8,7 +8,8 @@ import {
   Layers,
   Radio,
   Search,
-  Target
+  Target,
+  Sparkles
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -251,7 +252,7 @@ export default function OverviewView({ analysisData, onNavigate }) {
       </div>
 
       {/* Quick Action Navigation Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <button
           onClick={() => onNavigate('live')}
           className="p-5 rounded-2xl bg-slate-900/40 border border-slate-800/80 hover:border-cyan-500/50 hover:bg-slate-900/80 transition text-left group"
@@ -263,7 +264,7 @@ export default function OverviewView({ analysisData, onNavigate }) {
             Live Stream Terminal &rarr;
           </h4>
           <p className="text-xs text-slate-400 mt-1">
-            Monitor real-world 24/7 Binance crypto feeds and Open-Meteo environmental sensors side-by-side.
+            Monitor real-world 24/7 Binance crypto feeds and Open-Meteo environmental sensors.
           </p>
         </button>
 
@@ -275,10 +276,10 @@ export default function OverviewView({ analysisData, onNavigate }) {
             <Search className="w-5 h-5" />
           </div>
           <h4 className="text-sm font-bold text-white group-hover:text-purple-400 transition">
-            SHAP Explainability Studio &rarr;
+            SHAP Explainability &rarr;
           </h4>
           <p className="text-xs text-slate-400 mt-1">
-            Inspect which macroeconomic factors caused the decay and inspect individual loan waterfalls.
+            Inspect macroeconomic attribution shifts (Δ|SHAP|) and individual loan waterfalls.
           </p>
         </button>
 
@@ -290,10 +291,25 @@ export default function OverviewView({ analysisData, onNavigate }) {
             <Target className="w-5 h-5" />
           </div>
           <h4 className="text-sm font-bold text-white group-hover:text-emerald-400 transition">
-            Conformal Prediction Lab &rarr;
+            Conformal Prediction &rarr;
           </h4>
           <p className="text-xs text-slate-400 mt-1">
             Verify finite-sample 90% coverage guarantees and watch prediction sets widen under drift.
+          </p>
+        </button>
+
+        <button
+          onClick={() => onNavigate('llm')}
+          className="p-5 rounded-2xl bg-slate-900/40 border border-indigo-500/30 hover:border-indigo-500/70 hover:bg-slate-900/80 transition text-left group"
+        >
+          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mb-3 group-hover:scale-105 transition">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <h4 className="text-sm font-bold text-white group-hover:text-indigo-400 transition">
+            LLM Drift Studio &rarr;
+          </h4>
+          <p className="text-xs text-slate-400 mt-1">
+            Track embedding MMD, model collapse D(t) ∝ 1/M(t), and hallucination escalation (IEEE 2025).
           </p>
         </button>
       </div>

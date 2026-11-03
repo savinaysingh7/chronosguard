@@ -111,3 +111,30 @@ export async function simulateDrift(covariateDrift, shockFactor, conceptDrift) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.json();
 }
+
+export async function fetchLlmCohorts() {
+  const res = await fetch(`${API_BASE}/llm/cohorts`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function analyzeLlmCohort(cohortKey) {
+  const res = await fetch(`${API_BASE}/llm/analyze/${cohortKey}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function simulateLlmDrift(syntheticRatio = 0.5, promptShiftFactor = 0.5, geoBias = 0.3) {
+  const res = await fetch(`${API_BASE}/llm/simulate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      synthetic_ratio: syntheticRatio,
+      prompt_shift_factor: promptShiftFactor,
+      geo_bias: geoBias,
+    }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
